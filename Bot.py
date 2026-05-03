@@ -3,6 +3,7 @@ from telebot import types
 import os
 from dotenv import load_dotenv
 load_dotenv()
+from db import create_table, add_task, get_tasks, delete_task, mark_task_completed
 bot = telebot.TeleBot(os.getenv("TOKEN"))
 
 def create_replykeyboard():
@@ -14,14 +15,12 @@ def create_replykeyboard():
     kb.add(btn1,btn2,btn3,btn4)
     return kb
 
-tasks = {}
 
 # Обработчик /start
 @bot.message_handler(commands=["start"])
 def start(message):
     user_id = message.chat.id
-    if user_id not in tasks:
-        tasks[user_id] = []
+    create_table()
     bot.send_message(message.chat.id, "Привет, я <b>TO-DO бот</b>. Отправляй мне свои задачи и я помогу их орагнизовать :3", parse_mode="HTML", reply_markup=create_replykeyboard())
 
 # Добавление задачи 
@@ -32,24 +31,22 @@ def set_task(message):
 
 def addtask(message):
     user_id = message.chat.id
-    if user_id not in tasks:
-        tasks[user_id] = []
-    tasks[user_id].append(message.text)
+    task = message.text
+    add_task(user_id, task)
     bot.send_message(message.chat.id, "Ваша задача успешно добавлена!")
  
 # Просмотр задач
 @bot.message_handler(func=lambda y: y.text == "Посмотреть список задач")
-def get_tasks(message):
+def view_tasks(message):
     user_id = message.chat.id
-    if user_id not in tasks:
-        tasks[user_id] = []
-    if len(tasks[user_id]) == 0:
+    tasks = get_tasks(user_id)
+    if len(tasks) == 0:
         bot.send_message(message.chat.id, "У вас 0 задач")
         return 0
     
     send_task = "Текущие задачи: \n\n"
-    for i, task in enumerate(tasks[user_id], start=1):
-        send_task += f"{i}. {task}\n"
+    for i, task in enumerate(tasks, start=1):
+        send_task += f"{i}. {task[1]}\n"
         
     bot.send_message(message.chat.id, send_task)
        
@@ -57,58 +54,66 @@ def get_tasks(message):
 @bot.message_handler(func=lambda y: y.text == "Отметить задачу выполненной") 
 def complete_task(message):
     user_id = message.chat.id
-    get_tasks(message)
-    if len(tasks[user_id]) > 0:
+    user_tasks = get_tasks(user_id)
+    if len(user_tasks) > 0:
         bot.send_message(message.chat.id, "Выберите выполненную задачу:")
         bot.register_next_step_handler(message, choose_task)
+    else:
+        bot.send_message(message.chat.id, "У вас 0 задач")
  
 def choose_task(message):
     user_id = message.chat.id
+    user_tasks = get_tasks(user_id)
     if not message.text.isdigit():
         bot.send_message(message.chat.id, "Пожалуйста, введите номер задачи!")
         bot.register_next_step_handler(message, choose_task)
         return
-    if int(message.text) < 1 or int(message.text) > len(tasks[user_id]):
+    task_index = int(message.text)
+    if task_index < 1 or task_index > len(user_tasks):
         bot.send_message(message.chat.id, "Такой задачи не существует")
         bot.register_next_step_handler(message, choose_task)
         return
-    for i, task in enumerate(tasks[user_id], start=1):
-        if int(message.text) == i:
-            task_index = i - 1
-            if tasks[user_id][task_index][-1] != "☑":
-                tasks[user_id][task_index] = tasks[user_id][task_index] + " ☑"
-                bot.send_message(message.chat.id, f"Задача {i}. {task} выполнена ☑")
-            else:
-                bot.send_message(message.chat.id, "Задача уже выполнена")
+    task_id = user_tasks[task_index - 1][0]
+    mark_task_completed(task_id)
+    bot.send_message(message.chat.id, "Задача отмечена как выполненная!")
                 
 # Удаление задач         
 @bot.message_handler(func=lambda y: y.text == "Удалить задачу") 
-def delete_task(message):
-    get_tasks(message)
+def delete_task_handler(message):
+    user_id = message.chat.id
+    user_tasks = get_tasks(user_id)
+    if len(user_tasks) == 0:
+        bot.send_message(message.chat.id, "У вас 0 задач")
+        return
     bot.send_message(message.chat.id, "Выберите задачу для удаления:")
     bot.register_next_step_handler (message, dele)
 
 def dele(message):
     user_id = message.chat.id
+    user_tasks = get_tasks(user_id)
     if not message.text.isdigit():
         bot.send_message(message.chat.id, "Пожалуйста, введите номер задачи!")
         bot.register_next_step_handler(message, dele)
         return
-    if int(message.text) < 1 or int(message.text) > len(tasks[user_id]):
+    task_index = int(message.text)
+    if task_index < 1 or task_index > len(user_tasks):
         bot.send_message(message.chat.id, "Такой задачи не существует")
-        bot.register_next_step_handler(message, choose_task)
+        bot.register_next_step_handler(message, dele)
         return
-    for i, task in enumerate(tasks[user_id], start=1):
-        if int(message.text) == i:
-            task_index = i - 1
-            tasks[user_id].pop(task_index)
-            bot.send_message(message.chat.id, f"Задача {i}. {task} была удалена")
+    task_id = user_tasks[task_index - 1][0]
+    delete_task(task_id)
+    bot.send_message(message.chat.id, "Задача удалена!")
 
 # Любое сообщение
 @bot.message_handler(func=lambda x:True)
 def reply_to_all_message(message):
     bot.send_message(message.chat.id, "Выберите действие кнопками", reply_markup=create_replykeyboard())
-     
-bot.polling() 
+
+
+if __name__ == "__main__":
+    bot.polling() 
+
+
+
 
 
